@@ -77,7 +77,7 @@ def check_vip():
                     print(f"{GREEN}{BOLD}✅ License Verified (Offline Mode){RESET}")
                     print(f"{CYAN}{BOLD}👤 VIP User : {lic_data.get('key')}{RESET}")
                     print(f"{CYAN}{BOLD}📆 Expires  : {lic_data.get('expiry')}{RESET}")
-                    print("-" * 40)
+                    print("-" * 30)
                     time.sleep(1.5)
                     return True
                 else:
@@ -86,7 +86,7 @@ def check_vip():
         except: pass
 
     print(f"{CYAN}{BOLD}YOUR ID : {RESET}{YELLOW}{BOLD}{my_id}{RESET}")
-    print(f"{RED}{BOLD}[!] Offline Data Missing or Expired.{RESET}")
+    print(f"{RED}{BOLD}⚠️ Offline Data Missing or Expired.{RESET}")
     print(f"[*] Connecting to Google Cloud Server...")
 
     try:
@@ -130,18 +130,22 @@ def check_vip():
 # ===============================
 def check_real_internet():
     try:
-        return requests.get("http://www.google.com/generate_204", timeout=3).status_code == 204
+        return requests.get("http://connectivitycheck.gstatic.com/generate_204", timeout=3).status_code == 204
     except:
         return False
 
-def high_speed_pulse(auth_link):
-    headers = {"User-Agent": "Mozilla/5.0", "Connection": "keep-alive"}
+def stable_pulse(auth_link):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Connection": "keep-alive"
+    }
     while not stop_event.is_set():
         try:
-            requests.get(auth_link, timeout=5, verify=False, headers=headers)
-            time.sleep(0.05)
+            # Heartbeat every 30 seconds to keep the session alive sustainably
+            requests.get(auth_link, timeout=10, verify=False, headers=headers)
+            time.sleep(30)
         except:
-            time.sleep(1)
+            time.sleep(2)
             break
 
 # ===============================
@@ -161,26 +165,33 @@ def start_process():
     while not stop_event.is_set():
         session = requests.Session()
         try:
-            r = requests.get("http://connectivitycheck.gstatic.com/generate_204", allow_redirects=True, timeout=5)
+            # Internet Check & Spinner Animation
+            is_online = check_real_internet()
             
-            if r.status_code == 204 and check_real_internet():
+            if is_online:
                 if start_time is None:
                     start_time = time.time()
                 
-                elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
-                print(f"{GREEN}{BOLD}✅ Internet Connected! {ORANGE}{BOLD}[ {spinner[spin_idx]} ] {CYAN}{BOLD}Session: {elapsed} {RESET}", end="\r")
-                
-                spin_idx = (spin_idx + 1) % len(spinner)
-                time.sleep(0.1)
+                # Active Spinner Animation Loop
+                for _ in range(15):
+                    elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
+                    print(f"{GREEN}{BOLD}✅ Internet Connected! {ORANGE}{BOLD}[ {spinner[spin_idx]} ] {CYAN}{BOLD}Active: {elapsed} {RESET}", end="\r")
+                    spin_idx = (spin_idx + 1) % len(spinner)
+                    time.sleep(0.1)
                 continue
 
+            # If no Internet, Start Reconnection Process
             start_time = None 
+            print(f"\n{YELLOW}{BOLD}🔎 Searching for Portal...{RESET}")
+            
+            r = requests.get("http://connectivitycheck.gstatic.com/generate_204", allow_redirects=True, timeout=5)
             portal_url = r.url
             parsed_portal = urlparse(portal_url)
             portal_host = f"{parsed_portal.scheme}://{parsed_portal.netloc}"
             
-            print(f"\n{CYAN}{BOLD}[*] Portal Detected: {portal_host}{RESET}")
+            print(f"{CYAN}{BOLD}🚀 Portal Detected: {portal_host}{RESET}")
 
+            # Capture Session ID (SID)
             r1 = session.get(portal_url, verify=False, timeout=10)
             path_match = re.search(r"location\.href\s*=\s*['\"]([^'\"]+)['\"]", r1.text)
             next_url = urljoin(portal_url, path_match.group(1)) if path_match else portal_url
@@ -192,27 +203,41 @@ def start_process():
                 sid = sid_match.group(1) if sid_match else None
             
             if not sid:
-                print(f"{RED}{BOLD}[!] Waiting for Portal Login...{RESET}", end="\r")
+                print(f"{RED}{BOLD}⚠️ Session ID Extraction Failed. Retrying...{RESET}", end="\r")
                 time.sleep(3)
                 continue
 
-            print(f"{GREEN}{BOLD}✅ SID Captured: {sid}{RESET}")
+            print(f"{GREEN}{BOLD}✅ Token Captured: {sid}{RESET}")
 
             params = parse_qs(parsed_portal.query)
             gw_addr = params.get('gw_address', ['192.168.60.1'])[0]
             gw_port = params.get('gw_port', ['2060'])[0]
             auth_link = f"http://{gw_addr}:{gw_port}/wifidog/auth?token={sid}"
 
-            print_header("Turbo Threads Active")
-            for i in range(100):
-                threading.Thread(target=high_speed_pulse, args=(auth_link,), daemon=True).start()
+            print_header("Pulse Engine Active")
+            
+            # Re-Authentication Loop Using Threads
+            pulse_threads = []
+            for i in range(5):
+                t = threading.Thread(target=stable_pulse, args=(auth_link,), daemon=True)
+                t.start()
+                pulse_threads.append(t)
 
-            time.sleep(2)
+            # Monitor Active Session
+            while any(t.is_alive() for t in pulse_threads) and not stop_event.is_set():
+                if check_real_internet():
+                    elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - (start_time or time.time())))
+                    print(f"{GREEN}{BOLD}✅ Internet Connected! {ORANGE}{BOLD}[ {spinner[spin_idx]} ] {CYAN}{BOLD}Active: {elapsed} {RESET}", end="\r")
+                    spin_idx = (spin_idx + 1) % len(spinner)
+                    time.sleep(0.2)
+                else:
+                    print(f"\n{RED}{BOLD}⚠️ Connection Lost. Re-Detecting...{RESET}")
+                    break
 
         except KeyboardInterrupt:
             stop_event.set()
             break
-        except:
+        except Exception:
             time.sleep(5)
 
 if __name__ == "__main__":
@@ -221,4 +246,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         stop_event.set()
     finally:
-        print(f"\n\n{RED}{BOLD}🛑 ShutDown...{RESET}")
+        print(f"\n\n{RED}{BOLD}🛑 System Shutdown...{RESET}")
